@@ -56,7 +56,13 @@ func (i *Client) read() {
 	tp := textproto.NewReader(r)
 
 	for {
-		l, _ := tp.ReadLine()
+		l, err := tp.ReadLine()
+		if err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			log.Fatal(err)
+		}
 		ws := strings.Split(l, " ")
 
 		ev := &adapter.Event{}
