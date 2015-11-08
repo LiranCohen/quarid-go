@@ -22,7 +22,6 @@ func (i *Client) Loop() {
 	for m := range i.events {
 		go i.handleEvent(m)
 	}
-
 	<-i.dead
 }
 
