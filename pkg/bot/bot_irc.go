@@ -3,6 +3,8 @@ package bot
 import (
 	"fmt"
 	"io/ioutil"
+	"regexp"
+	"strings"
 
 	"github.com/enmand/quarid-go/pkg/adapter"
 	"github.com/enmand/quarid-go/pkg/config"
@@ -19,6 +21,7 @@ type quarid struct {
 
 	// Configuration from the user
 	Config *config.Config
+	Opers  map[string]struct{} //list of masks
 
 	// The Plugins we have loaded
 	plugins []plugin.Plugin
@@ -38,6 +41,11 @@ func (q *quarid) initialize() error {
 	// Initialize our VMs
 	q.vms = map[string]vm.VM{
 		vm.JS: js.NewVM(),
+	}
+	q.Opers = make(map[string]struct{})
+	admins := q.Config.GetStringSlice("irc.admins")
+	for _, admin := range admins {
+		q.Opers[admin] = struct{}{}
 	}
 
 	var errs []error
@@ -85,6 +93,86 @@ func (q *quarid) LoadPlugins(dirs []string) ([]plugin.Plugin, []error) {
 	return ps, errs
 }
 
+func getNick(mask string) string {
+	split := strings.Split(mask, "@")
+	if len(split) > 0 {
+		ident := strings.Split(mask, "!")
+		if len(ident) > 0 {
+			return ident[0]
+		}
+	}
+	return ""
+}
+
+func (q *quarid) matchMask(mask string) bool {
+	return false
+}
+
+func (q *quarid) SendPrv(destination, message string) error {
+	response := adapter.Event{
+		Command: irc.IRC_PRIVMSG,
+		Parameters: []string{
+			destination,
+			message,
+		},
+	}
+	if err := q.IRC.Write(&response); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (q *quarid) OPUser(channel, user string) error {
+	response := adapter.Event{
+		Command: irc.IRC_MODE,
+		Parameters: []string{
+			channel,
+			"+o",
+			user,
+		},
+	}
+	if err := q.IRC.Write(&response); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (q *quarid) prvMsg(ev *adapter.Event, c adapter.Responder) {
+	logger.Log.Printf("Handle Private Message: %v\n", ev)
+	if len(ev.Parameters) > 1 {
+		if ev.Parameters[0] == q.IRC.Nick {
+			return
+		}
+		bang := regexp.MustCompile("^!(.*)$")
+		if match := bang.FindString(ev.Parameters[1]); len(match) > 0 {
+			cmd := strings.Split(match[1:], " ")
+			if len(cmd) > 0 {
+				switch strings.ToUpper(cmd[0]) {
+				case "OP":
+					if q.matchMask(ev.Prefix) {
+						if err := q.OPUser(
+							ev.Parameters[0],
+							getNick(ev.Prefix),
+						); err != nil {
+							logger.Log.Error(err)
+						}
+					} else {
+						message := fmt.Sprintf("%v: Go Fuck Yourself!")
+						if err := q.SendPrv(ev.Parameters[0], message); err != nil {
+							logger.Log.Error(err)
+						}
+					}
+				default:
+					message := fmt.Sprintf("%v: Unknown command", getNick(ev.Prefix))
+					if err := q.SendPrv(ev.Parameters[0], message); err != nil {
+						logger.Log.Error(err)
+					}
+				}
+			}
+		}
+	}
+}
+
 func (q *quarid) Connect() error {
 	err := q.IRC.Connect(q.Config.GetString("irc.server"))
 	if err != nil {
@@ -94,6 +182,11 @@ func (q *quarid) Connect() error {
 	q.IRC.Handle(
 		[]adapter.Filter{irc.CommandFilter{Command: irc.IRC_RPL_MYINFO}},
 		q.joinChan,
+	)
+
+	q.IRC.Handle(
+		[]adapter.Filter{irc.CommandFilter{Command: irc.IRC_PRIVMSG}},
+		q.prvMsg,
 	)
 
 	q.IRC.Loop()
