@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"regexp"
@@ -23,7 +24,13 @@ type quarid struct {
 	Config *config.Config
 
 	// List of Opers
-	Opers map[string]struct{} //list of masks
+	Opers map[string]struct{}
+
+	//List of Channel Ops
+	ChanOps map[string][]string // map[channel][]mask
+
+	//List of Channel Ops
+	ChanAdmins map[string][]string // map[channel][]mask
 
 	// The Plugins we have loaded
 	plugins []plugin.Plugin
@@ -52,6 +59,7 @@ func (q *quarid) initialize() error {
 		vm.JS: js.NewVM(),
 	}
 	q.Opers = make(map[string]struct{})
+	q.ChanOps = make(map[string][]string)
 	admins := q.Config.GetStringSlice("irc.admins")
 	for _, admin := range admins {
 		q.Opers[admin] = struct{}{}
@@ -113,8 +121,87 @@ func getNick(mask string) string {
 	return ""
 }
 
+type HostMask struct {
+	Nick string
+	User string
+	Host string
+}
+
+func FormatMask(mask string) (HostMask, error) {
+	hm := HostMask{}
+	hostSplit := strings.Split(mask, "@")
+	if len(hostSplit) > 1 {
+		preSplit := strings.Split(hostSplit[0], "!")
+		hm.Host = hostSplit[1]
+		if len(preSplit) > 1 {
+			hm.Nick = preSplit[0]
+			hm.User = preSplit[1]
+			return hm, nil
+		} else if len(preSplit) > 0 && preSplit[0] == "*" {
+			hm.Nick = "*"
+			hm.User = "*"
+			return hm, nil
+		}
+	}
+	return hm, errors.New("invalid mask")
+}
+
+//Taken from github.com/edmund-huber/ergonomadic
+// Generate a regular expression from the set of user mask
+// strings. Masks are split at the two types of wildcards, `*` and
+// `?`. All the pieces are meta-escaped. `*` is replaced with `.*`,
+// the regexp equivalent. Likewise, `?` is replaced with `.`. The
+// parts are re-joined and finally all masks are joined into a big
+// or-expression.
+func maskRegexp(masks []string) *regexp.Regexp {
+	rReg := &regexp.Regexp{}
+	if len(masks) == 0 {
+		rReg = nil
+		return rReg
+	}
+
+	maskExprs := make([]string, len(masks))
+	for index, mask := range masks {
+		manyParts := strings.Split(mask, "*")
+		manyExprs := make([]string, len(manyParts))
+		for mindex, manyPart := range manyParts {
+			oneParts := strings.Split(manyPart, "?")
+			oneExprs := make([]string, len(oneParts))
+			for oindex, onePart := range oneParts {
+				oneExprs[oindex] = regexp.QuoteMeta(onePart)
+			}
+			manyExprs[mindex] = strings.Join(oneExprs, ".")
+		}
+		maskExprs[index] = strings.Join(manyExprs, ".*")
+	}
+	expr := "^" + strings.Join(maskExprs, "|") + "$"
+	rReg, _ = regexp.Compile(expr)
+	return rReg
+}
+
 func (q *quarid) matchMask(mask string) bool {
-	return true
+	fMask, err := FormatMask(mask)
+	if err != nil {
+		logger.Log.Error(err)
+	}
+	aMasks := []string{}
+	for oper, _ := range q.Opers {
+		operMask, err := FormatMask(oper)
+		if err != nil {
+			logger.Log.Error(err)
+			continue
+		}
+		if operMask.Nick == "*" || operMask.Nick == fMask.Nick {
+			if operMask.User == "*" || operMask.User == fMask.User {
+				aMasks = append(aMasks, operMask.Host)
+			}
+		}
+	}
+	rReg := maskRegexp(aMasks)
+	if rReg.MatchString(fMask.Host) {
+		return true
+	}
+	return false
 }
 
 func (q *quarid) SendPrv(destination, message string) error {
@@ -146,6 +233,13 @@ func (q *quarid) OPUser(channel, user string) error {
 	return nil
 }
 
+func (q *quarid) permissionsMessage(ev *adapter.Event, c adapter.Responder) {
+	message := fmt.Sprintf("%v: bugger off!", getNick(ev.Prefix))
+	if err := q.SendPrv(ev.Parameters[0], message); err != nil {
+		logger.Log.Error(err)
+	}
+}
+
 func (q *quarid) prvMsg(ev *adapter.Event, c adapter.Responder) {
 	logger.Log.Printf("Handle Private Message: %v\n", ev)
 	if len(ev.Parameters) > 1 {
@@ -158,6 +252,7 @@ func (q *quarid) prvMsg(ev *adapter.Event, c adapter.Responder) {
 			if len(cmd) > 0 {
 				switch strings.ToUpper(cmd[0]) {
 				case "OP":
+					opMasks, _ := q.ChanOps[ev.Parameters[0]]
 					if q.matchMask(ev.Prefix) {
 						if err := q.OPUser(
 							ev.Parameters[0],
@@ -165,13 +260,79 @@ func (q *quarid) prvMsg(ev *adapter.Event, c adapter.Responder) {
 						); err != nil {
 							logger.Log.Error(err)
 						}
-					} else {
-						message := fmt.Sprintf("%v: Go Fuck Yourself!")
-						if err := q.SendPrv(ev.Parameters[0], message); err != nil {
+					} else if len(opMasks) > 0 {
+						rReg := maskRegexp(opMasks)
+						fMask, err := FormatMask(ev.Prefix)
+						if err != nil {
 							logger.Log.Error(err)
 						}
+						if rReg.MatchString(fMask.Host) {
+							if err := q.OPUser(
+								ev.Parameters[0],
+								getNick(ev.Prefix),
+							); err != nil {
+								logger.Log.Error(err)
+							}
+						} else {
+							logger.Log.Printf("REGEX: %#v", rReg)
+							q.permissionsMessage(ev, c)
+						}
+					} else {
+						q.permissionsMessage(ev, c)
 					}
+				case "ADDADMIN":
+					if q.matchMask(ev.Prefix) {
+						fMask, _ := FormatMask(cmd[1])
+						q.ChanAdmins[ev.Parameters[0]] = append(
+							q.ChanAdmins[ev.Parameters[0]],
+							fMask.Host,
+						)
+					} else {
+						q.permissionsMessage(ev, c)
+					}
+				case "ADDOP":
+					if q.matchMask(ev.Prefix) {
+						fMask, _ := FormatMask(cmd[1])
+						q.ChanOps[ev.Parameters[0]] = append(
+							q.ChanOps[ev.Parameters[0]],
+							fMask.Host,
+						)
+					} else {
+						q.permissionsMessage(ev, c)
+					}
+				case "DROPOP":
+					if q.matchMask(ev.Prefix) {
+						fMask, _ := FormatMask(cmd[1])
+						for i, mask := range q.ChanOps[ev.Parameters[0]] {
+							if mask == fMask.Host {
+								q.ChanOps[ev.Parameters[0]] = append(
+									q.ChanOps[ev.Parameters[0]][:i],
+									q.ChanOps[ev.Parameters[0]][i+1:]...,
+								)
+
+							}
+						}
+					} else {
+						q.permissionsMessage(ev, c)
+					}
+				case "DROPADMIN":
+					if q.matchMask(ev.Prefix) {
+						fMask, _ := FormatMask(cmd[1])
+						for i, mask := range q.ChanAdmins[ev.Parameters[0]] {
+							if mask == fMask.Host {
+								q.ChanAdmins[ev.Parameters[0]] = append(
+									q.ChanAdmins[ev.Parameters[0]][:i],
+									q.ChanAdmins[ev.Parameters[0]][i+1:]...,
+								)
+
+							}
+						}
+					} else {
+						q.permissionsMessage(ev, c)
+					}
+
 				default:
+					logger.Log.Printf("\n\n\n DEFAULT:%v\n\n\n", cmd[0])
 					message := fmt.Sprintf("%v: Unknown command", getNick(ev.Prefix))
 					if err := q.SendPrv(ev.Parameters[0], message); err != nil {
 						logger.Log.Error(err)
