@@ -22,8 +22,12 @@ func (i *Client) Write(ev *adapter.Event) error {
 	for i, p := range ev.Parameters {
 		if i == len(ev.Parameters)-1 && len(ev.Parameters) > 1 {
 			//What was the point of this? it causes errors...
-			//p = fmt.Sprintf(":%s\r\n", p)
-			p = fmt.Sprintf("%s\r\n", p)
+			//Okk i see now it messed up IRC_OPER, i'll allow it for PRIVMSG
+			if ev.Command == IRC_PRIVMSG {
+				p = fmt.Sprintf(":%s\r\n", p)
+			} else {
+				p = fmt.Sprintf("%s\r\n", p)
+			}
 		}
 		payload = append(payload, []byte(p))
 	}

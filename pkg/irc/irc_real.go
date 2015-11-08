@@ -59,7 +59,7 @@ func (i *Client) fixNick(
 	c adapter.Responder,
 ) {
 	nick := i.Nick
-	uniq := shortuuid.UUID()
+	uniq := shortuuid.UUID()[:5]
 
 	newNick := fmt.Sprintf("%s_%s", nick, uniq)
 	i.Nick = newNick
