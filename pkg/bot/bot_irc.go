@@ -240,123 +240,159 @@ func (q *quarid) permissionsMessage(ev *adapter.Event, c adapter.Responder) {
 	}
 }
 
-func FormatCommand(cmd string) []string {
-	//remove bang sign
-	cmd = cmd[1:]
+const CMD_SYM = "!"
 
-	return strings.Split(cmd, " ")
+func FormatCommand(symbol, input string) ([]string, error) {
+	//check for symbol
+	if len(symbol) < 1 || len(symbol) > 5 {
+		return []string{}, errors.New("invalid symbol")
+	}
+	sym, err := regexp.Compile("^" + symbol + "(.*)$")
+	if err != nil {
+		return []string{}, errors.New("regex: invalid symbol")
+	}
+	if match := sym.FindString(input); len(match) > 0 {
+		return strings.Split(match[1:], " "), nil
+	}
+
+	return []string{}, errors.New("invalid command")
+}
+
+func (q *quarid) checkChanAdmin(ev *adapter.Event) bool {
+	adMasks, _ := q.ChanAdmins[ev.Parameters[0]]
+	if len(adMasks) > 0 {
+		rReg := maskRegexp(adMasks)
+		fMask, err := FormatMask(ev.Prefix)
+		if err != nil {
+			logger.Log.Error(err)
+			return false
+		}
+		return rReg.MatchString(fMask.Host)
+	}
+	return false
+}
+
+func (q *quarid) checkChanPermissions(ev *adapter.Event) bool {
+	opMasks, _ := q.ChanOps[ev.Parameters[0]]
+	adMasks, _ := q.ChanAdmins[ev.Parameters[0]]
+	allMasks := append(opMasks, adMasks...)
+	if len(allMasks) > 0 {
+		rReg := maskRegexp(allMasks)
+		fMask, err := FormatMask(ev.Prefix)
+		if err != nil {
+			logger.Log.Error(err)
+			return false
+		}
+		return rReg.MatchString(fMask.Host)
+	}
+	return false
 }
 
 func (q *quarid) cmdChanOP(ev *adapter.Event, c adapter.Responder) {
-
-}
-func (q *quarid) cmdAddOP(ev *adapter.Event, c adapter.Responder) {
-
-}
-func (q *quarid) cmdDropOP(ev *adapter.Event, c adapter.Responder) {
-
-}
-
-func (q *quarid) prvMsg(ev *adapter.Event, c adapter.Responder) {
-	logger.Log.Printf("Handle Private Message: %v\n", ev)
-	if len(ev.Parameters) > 1 {
-		if ev.Parameters[0] == q.IRC.Nick {
-			return
+	cmd, err := FormatCommand(CMD_SYM, ev.Parameters[1])
+	if err != nil {
+		return
+	}
+	if strings.ToUpper(cmd[0]) == "OP" {
+		if q.matchMask(ev.Prefix) || q.checkChanPermissions(ev) {
+			if err := q.OPUser(
+				ev.Parameters[0],
+				getNick(ev.Prefix),
+			); err != nil {
+				logger.Log.Error(err)
+			}
+		} else {
+			q.permissionsMessage(ev, c)
 		}
-		bang := regexp.MustCompile("^!(.*)$")
-		if match := bang.FindString(ev.Parameters[1]); len(match) > 0 {
-			cmd := strings.Split(match[1:], " ")
-			if len(cmd) > 0 {
-				switch strings.ToUpper(cmd[0]) {
-				case "OP":
-					opMasks, _ := q.ChanOps[ev.Parameters[0]]
-					if q.matchMask(ev.Prefix) {
-						if err := q.OPUser(
-							ev.Parameters[0],
-							getNick(ev.Prefix),
-						); err != nil {
-							logger.Log.Error(err)
-						}
-					} else if len(opMasks) > 0 {
-						rReg := maskRegexp(opMasks)
-						fMask, err := FormatMask(ev.Prefix)
-						if err != nil {
-							logger.Log.Error(err)
-						}
-						if rReg.MatchString(fMask.Host) {
-							if err := q.OPUser(
-								ev.Parameters[0],
-								getNick(ev.Prefix),
-							); err != nil {
-								logger.Log.Error(err)
-							}
-						} else {
-							logger.Log.Printf("REGEX: %#v", rReg)
-							q.permissionsMessage(ev, c)
-						}
-					} else {
-						q.permissionsMessage(ev, c)
-					}
-				case "ADDADMIN":
-					if q.matchMask(ev.Prefix) {
-						fMask, _ := FormatMask(cmd[1])
-						q.ChanAdmins[ev.Parameters[0]] = append(
-							q.ChanAdmins[ev.Parameters[0]],
-							fMask.Host,
-						)
-					} else {
-						q.permissionsMessage(ev, c)
-					}
-				case "ADDOP":
-					if q.matchMask(ev.Prefix) {
-						fMask, _ := FormatMask(cmd[1])
-						q.ChanOps[ev.Parameters[0]] = append(
-							q.ChanOps[ev.Parameters[0]],
-							fMask.Host,
-						)
-					} else {
-						q.permissionsMessage(ev, c)
-					}
-				case "DROPOP":
-					if q.matchMask(ev.Prefix) {
-						fMask, _ := FormatMask(cmd[1])
-						for i, mask := range q.ChanOps[ev.Parameters[0]] {
-							if mask == fMask.Host {
-								q.ChanOps[ev.Parameters[0]] = append(
-									q.ChanOps[ev.Parameters[0]][:i],
-									q.ChanOps[ev.Parameters[0]][i+1:]...,
-								)
+	}
+}
 
-							}
-						}
-					} else {
-						q.permissionsMessage(ev, c)
-					}
-				case "DROPADMIN":
-					if q.matchMask(ev.Prefix) {
-						fMask, _ := FormatMask(cmd[1])
-						for i, mask := range q.ChanAdmins[ev.Parameters[0]] {
-							if mask == fMask.Host {
-								q.ChanAdmins[ev.Parameters[0]] = append(
-									q.ChanAdmins[ev.Parameters[0]][:i],
-									q.ChanAdmins[ev.Parameters[0]][i+1:]...,
-								)
+func (q *quarid) cmdAddAdmin(ev *adapter.Event, c adapter.Responder) {
+	cmd, err := FormatCommand(CMD_SYM, ev.Parameters[1])
+	if err != nil {
+		return
+	}
+	if strings.ToUpper(cmd[0]) == "ADDADMIN" {
+		if q.matchMask(ev.Prefix) || q.checkChanAdmin(ev) {
+			fMask, _ := FormatMask(cmd[1])
+			q.ChanAdmins[ev.Parameters[0]] = append(
+				q.ChanAdmins[ev.Parameters[0]],
+				fMask.Host,
+			)
+		} else {
+			q.permissionsMessage(ev, c)
+		}
+	}
+}
 
-							}
-						}
-					} else {
-						q.permissionsMessage(ev, c)
-					}
-
-				default:
-					logger.Log.Printf("\n\n\n DEFAULT:%v\n\n\n", cmd[0])
-					message := fmt.Sprintf("%v: Unknown command", getNick(ev.Prefix))
-					if err := q.SendPrv(ev.Parameters[0], message); err != nil {
-						logger.Log.Error(err)
-					}
+func (q *quarid) cmdDropAdmin(ev *adapter.Event, c adapter.Responder) {
+	cmd, err := FormatCommand(CMD_SYM, ev.Parameters[1])
+	if err != nil {
+		return
+	}
+	if strings.ToUpper(cmd[0]) == "ADDADMIN" {
+		if q.matchMask(ev.Prefix) || q.checkChanAdmin(ev) {
+			fMask, _ := FormatMask(cmd[1])
+			for i, mask := range q.ChanAdmins[ev.Parameters[0]] {
+				if mask == fMask.Host {
+					q.ChanAdmins[ev.Parameters[0]] = append(
+						q.ChanAdmins[ev.Parameters[0]][:i],
+						q.ChanAdmins[ev.Parameters[0]][i+1:]...,
+					)
 				}
 			}
+		} else {
+			q.permissionsMessage(ev, c)
 		}
+	}
+}
+
+func (q *quarid) cmdAddOP(ev *adapter.Event, c adapter.Responder) {
+	cmd, err := FormatCommand(CMD_SYM, ev.Parameters[1])
+	if err != nil {
+		return
+	}
+	if strings.ToUpper(cmd[0]) == "ADDOP" {
+		if q.matchMask(ev.Prefix) || q.checkChanAdmin(ev) {
+			fMask, _ := FormatMask(cmd[1])
+			q.ChanOps[ev.Parameters[0]] = append(
+				q.ChanOps[ev.Parameters[0]],
+				fMask.Host,
+			)
+		} else {
+			q.permissionsMessage(ev, c)
+		}
+	}
+}
+
+func (q *quarid) cmdDropOp(ev *adapter.Event, c adapter.Responder) {
+	cmd, err := FormatCommand(CMD_SYM, ev.Parameters[1])
+	if err != nil {
+		return
+	}
+	if strings.ToUpper(cmd[0]) == "DROPOP" {
+		if q.matchMask(ev.Prefix) || q.checkChanAdmin(ev) {
+			fMask, _ := FormatMask(cmd[1])
+			for i, mask := range q.ChanOps[ev.Parameters[0]] {
+				if mask == fMask.Host {
+					q.ChanOps[ev.Parameters[0]] = append(
+						q.ChanOps[ev.Parameters[0]][:i],
+						q.ChanOps[ev.Parameters[0]][i+1:]...,
+					)
+				}
+			}
+		} else {
+			q.permissionsMessage(ev, c)
+		}
+	}
+}
+
+func (q *quarid) handleQuit(ev *adapter.Event, c adapter.Responder) {
+	if len(ev.Parameters) > 0 && ev.Parameters[0] == "quit" {
+		logger.Log.Warnf("Recieved Quit Command From Server")
+		logger.Log.Warnf("Shutting Down Bot")
+		q.Disconnect()
+		return
 	}
 }
 
@@ -370,12 +406,24 @@ func (q *quarid) Connect() error {
 		[]adapter.Filter{irc.CommandFilter{Command: irc.IRC_RPL_MYINFO}},
 		q.joinChan,
 	)
+	prvFuncs := []adapter.HandlerFunc{
+		q.cmdChanOP,
+		q.cmdAddOP,
+		q.cmdDropOp,
+		q.cmdAddAdmin,
+		q.cmdDropAdmin,
+	}
+	for _, hF := range prvFuncs {
+		q.IRC.Handle(
+			[]adapter.Filter{irc.CommandFilter{Command: irc.IRC_PRIVMSG}},
+			hF,
+		)
+	}
 
 	q.IRC.Handle(
-		[]adapter.Filter{irc.CommandFilter{Command: irc.IRC_PRIVMSG}},
-		q.prvMsg,
+		[]adapter.Filter{irc.CommandFilter{Command: irc.IRC_ERROR}},
+		q.handleQuit,
 	)
-
 	q.IRC.Loop()
 
 	return err
