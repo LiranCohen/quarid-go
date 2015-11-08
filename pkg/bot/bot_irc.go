@@ -240,6 +240,23 @@ func (q *quarid) permissionsMessage(ev *adapter.Event, c adapter.Responder) {
 	}
 }
 
+func FormatCommand(cmd string) []string {
+	//remove bang sign
+	cmd = cmd[1:]
+
+	return strings.Split(cmd, " ")
+}
+
+func (q *quarid) cmdChanOP(ev *adapter.Event, c adapter.Responder) {
+
+}
+func (q *quarid) cmdAddOP(ev *adapter.Event, c adapter.Responder) {
+
+}
+func (q *quarid) cmdDropOP(ev *adapter.Event, c adapter.Responder) {
+
+}
+
 func (q *quarid) prvMsg(ev *adapter.Event, c adapter.Responder) {
 	logger.Log.Printf("Handle Private Message: %v\n", ev)
 	if len(ev.Parameters) > 1 {
