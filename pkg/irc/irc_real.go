@@ -70,7 +70,6 @@ func (i *Client) fixNick(
 func (i *Client) authenticate() {
 	var err error
 	logger.Log.Infof("Authenticating for nick %s!%s", i.Nick, i.Ident)
-
 	err = i.Write(&adapter.Event{
 		Command: IRC_NICK,
 		Parameters: []string{
