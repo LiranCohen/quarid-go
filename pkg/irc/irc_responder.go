@@ -9,12 +9,14 @@ import (
 	"bytes"
 	"fmt"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/enmand/quarid-go/pkg/adapter"
 )
 
 // Write an event to the server, and return an error if it fails
 func (i *Client) Write(ev *adapter.Event) error {
 	var payload [][]byte
+	log.Printf("Writing Event: %#v", ev)
 
 	payload = append(payload, []byte(ev.Command))
 	for i, p := range ev.Parameters {
@@ -26,7 +28,6 @@ func (i *Client) Write(ev *adapter.Event) error {
 
 	payload = append(payload, []byte("\r\n"))
 	full := bytes.Join(payload, []byte(" "))
-
 	_, err := i.conn.Write(full)
 	return err
 }
