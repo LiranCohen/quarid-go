@@ -38,6 +38,9 @@ type Client struct {
 	// The client's nickname on the server
 	Nick string
 
+	Password string
+	// The client's password on the server
+
 	// The client's Ident on the server
 	Ident string
 
