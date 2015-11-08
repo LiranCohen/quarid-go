@@ -38,8 +38,11 @@ type Client struct {
 	// The client's nickname on the server
 	Nick string
 
-	Password string
-	// The client's password on the server
+	//The client's OPER username on the server (optional)
+	OPerUser string
+
+	// The client's OPER password on the server (optional)
+	OPerPass string
 
 	// The client's Ident on the server
 	Ident string

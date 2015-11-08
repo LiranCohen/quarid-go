@@ -21,7 +21,9 @@ type quarid struct {
 
 	// Configuration from the user
 	Config *config.Config
-	Opers  map[string]struct{} //list of masks
+
+	// List of Opers
+	Opers map[string]struct{} //list of masks
 
 	// The Plugins we have loaded
 	plugins []plugin.Plugin
@@ -37,6 +39,13 @@ func (q *quarid) initialize() error {
 		q.Config.GetBool("irc.tls.verify"),
 		q.Config.GetBool("irc.tls.enable"),
 	)
+
+	user := q.Config.GetString("irc.user")
+	password := q.Config.GetString("irc.password")
+	if len(user) > 0 && len(password) > 0 {
+		q.IRC.OPerUser = user
+		q.IRC.OPerPass = password
+	}
 
 	// Initialize our VMs
 	q.vms = map[string]vm.VM{
@@ -105,7 +114,7 @@ func getNick(mask string) string {
 }
 
 func (q *quarid) matchMask(mask string) bool {
-	return false
+	return true
 }
 
 func (q *quarid) SendPrv(destination, message string) error {
@@ -210,6 +219,18 @@ func (q *quarid) joinChan(
 	ev *adapter.Event,
 	c adapter.Responder,
 ) {
+	if len(q.IRC.OPerUser) > 0 {
+		if err := c.Write(&adapter.Event{
+			Command: irc.IRC_OPER,
+			Parameters: []string{
+				q.IRC.OPerUser,
+				q.IRC.OPerPass,
+			},
+		}); err != nil {
+			logger.Log.Error(err)
+		}
+	}
+
 	chans := q.Config.GetStringSlice("irc.channels")
 
 	joinCmd := &adapter.Event{
