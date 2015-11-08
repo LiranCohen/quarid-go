@@ -67,7 +67,8 @@ func (i *Client) read() {
 
 		ev := &adapter.Event{}
 
-		if prefix := ws[0]; prefix[0] == ':' {
+		prefix := ws[0]
+		if len(prefix) > 0 && prefix[0] == ':' {
 			ev.Prefix = prefix[1:]
 		} else {
 			ev.Prefix = ""
