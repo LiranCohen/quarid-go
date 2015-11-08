@@ -7,6 +7,8 @@ import (
 
 	"github.com/enmand/quarid-go/pkg/adapter"
 	"github.com/enmand/quarid-go/pkg/logger"
+
+	"github.com/renstrom/shortuuid"
 )
 
 // Connect connects this client to the server given
@@ -52,6 +54,18 @@ func (i *Client) Disconnect() error {
 
 	return err
 }
+func (i *Client) fixNick(
+	ev *adapter.Event,
+	c adapter.Responder,
+) {
+	nick := i.Nick
+	uniq := shortuuid.UUID()
+
+	newNick := fmt.Sprintf("%s_%s", nick, uniq)
+	i.Nick = newNick
+	i.authenticate()
+
+}
 
 func (i *Client) authenticate() {
 	var err error
@@ -63,6 +77,11 @@ func (i *Client) authenticate() {
 			i.Nick,
 		},
 	})
+
+	i.Handle(
+		[]adapter.Filter{CommandFilter{Command: IRC_ERR_NICKNAMEINUSE}},
+		i.fixNick,
+	)
 
 	// RFC 2812 USER command
 	err = i.Write(&adapter.Event{
