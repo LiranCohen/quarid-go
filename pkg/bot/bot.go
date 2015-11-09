@@ -27,8 +27,8 @@ type Bot interface {
 }
 
 // New returns a new instance of a Bot
-func New(cfg *config.Config) *quarid {
-	bot := &quarid{
+func New(cfg *config.Config) *Quarid {
+	bot := &Quarid{
 		Config: cfg,
 	}
 
