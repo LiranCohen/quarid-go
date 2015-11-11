@@ -53,6 +53,19 @@ func (q *quarid) initialize() error {
 		}
 	}
 
+	services := []string{
+		"chanServ",
+		"nivkServ",
+	}
+
+	msgService := &MsgService{}
+	prvMsg := msgService.initialize(services)
+
+	q.IRC.Handle(
+		[]adapter.Filter{irc.CommandFilter{Command: irc.IRC_PRIVMSG}},
+		prvMsg,
+	)
+
 	return nil
 }
 
@@ -92,7 +105,6 @@ func (q *quarid) Connect() error {
 	if err != nil {
 		return err
 	}
-
 	q.IRC.Handle(
 		[]adapter.Filter{irc.CommandFilter{Command: irc.IRC_RPL_MYINFO}},
 		q.joinChan,
