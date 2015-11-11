@@ -10,12 +10,13 @@ import (
 	"fmt"
 
 	"github.com/enmand/quarid-go/pkg/adapter"
+	"github.com/enmand/quarid-go/pkg/logger"
 )
 
 // Write an event to the server, and return an error if it fails
 func (i *Client) Write(ev *adapter.Event) error {
 	var payload [][]byte
-
+	logger.Log.Info("Writing event: ", ev)
 	payload = append(payload, []byte(ev.Command))
 	for i, p := range ev.Parameters {
 		if i == len(ev.Parameters)-1 && len(ev.Parameters) > 1 {
