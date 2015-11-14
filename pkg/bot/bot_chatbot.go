@@ -10,7 +10,7 @@ import (
 )
 
 type MsgService struct {
-	Services map[string]MsgHandler
+	Services map[string]Service
 }
 
 type Service interface {
@@ -31,11 +31,12 @@ type Command struct {
 
 func NewCommand(name, description string) Command {
 	c := Command{
-		Name:        name,
+		Name:        strings.ToUpper(name),
 		Description: description,
 		Restricted:  false,
 		Channel:     true,
 	}
+	c.Parameters = make(map[int]CmdParam)
 	return c
 }
 
@@ -45,19 +46,17 @@ type CmdParam struct {
 	Required    bool
 }
 
-type PrvMsg struct {
-	Prefix  string
-	Source  string
-	Message string
-}
-
-type MsgHandler func(*cmdOut, adapter.Responder)
+type MsgHandler func(cmdOut, adapter.Responder)
 
 func (ms *MsgService) initialize(services ...Service) adapter.HandlerFunc {
 	return func(ev *adapter.Event, c adapter.Responder) {
 		for _, service := range services {
 			if cmd, ok := readCommand(ev, service); ok {
-				logger.Log.Printf("%#v", cmd)
+				for _, command := range service.Commands() {
+					if command.Name == cmd.Name {
+						runCommand(cmd, command, c)
+					}
+				}
 			}
 		}
 	}
@@ -75,6 +74,12 @@ func checkChannel(s string) bool {
 		return true
 	}
 	return false
+}
+
+func runCommand(cmd cmdOut, c Command, r adapter.Responder) {
+	if c.Handler != nil {
+		c.Handler(cmd, r)
+	}
 }
 
 func readCommand(ev *adapter.Event, se Service) (cmdOut, bool) {
@@ -107,7 +112,7 @@ func readCommand(ev *adapter.Event, se Service) (cmdOut, bool) {
 		} else {
 			if len(params) > 0 {
 				cmd.Channel = ""
-				cmd.Name = strings.ToUpper(params[0])
+				cmd.Name = strings.ToUpper(params[0][1:])
 				cmd.Params = params[1:]
 				cmd.UserMask = ev.Prefix
 				return cmd, true
@@ -135,6 +140,19 @@ func MakeChanBot() GenServ {
 		"OP",
 		"OP a user or yourself within a channel",
 	)
+	cmdOp.Parameters[0] = CmdParam{
+		Name:        "Nick",
+		Description: []string{"Nick you would like to OP"},
+		Required:    false,
+	}
+	cmdOp.Parameters[1] = CmdParam{
+		Name:        "Channel",
+		Description: []string{"Channel to OP in"},
+		Required:    false,
+	}
+	cmdOp.Handler = func(cmd cmdOut, c adapter.Responder) {
+		logger.Log.Warnf("Cmd: %#v\n", cmd)
+	}
 
 	cmdAddOp := NewCommand(
 		"ADDOP",
@@ -161,6 +179,11 @@ func MakeNickBot() GenServ {
 		"Manage persistant user registration for the server",
 		"#",
 	)
+	cmdRegNick := NewCommand(
+		"REGISTER",
+		"Register a new nick",
+	)
+	nickBot.commands = []Command{cmdRegNick}
 
 	return nickBot
 }
@@ -189,52 +212,3 @@ func (gs GenServ) Commands() []Command {
 func (gs GenServ) Prefix() string {
 	return gs.prefix
 }
-
-//func (cb *ChanBot) Commands() (commands []Command) {
-//return cb.Commands
-//cmdOp := Command{
-//Name:        "OP",
-//Description: "OP yourself or another user within a channel",
-//Parameters: map[string][]string{
-//"NICK": {
-//"(optional) The Nick of the use you would like to OP, leave blank to OP yourself",
-//},
-//"CHANNEL": {
-//"(optional) If sent in a Private Message please include the target channel",
-//},
-//},
-//}
-//cmdOp.Handler = func(*Cmd, adapter.Responder) {
-//if Cmd.Name == "OP" {
-//switch len(Cmd.Parameters) {
-//case 0:
-//if !checkChannel(Cmd.Parameters[0]) {
-//}
-//case 1:
-//case 2:
-//default:
-//}
-//}
-//}
-//return
-//}
-
-//func (pm *PrvMsg) cmdChanOP() {
-
-//}
-
-//func (pm *PrvMsg) cmdAddOp() {
-
-//}
-
-//func (pm *PrvMsg) cmdDropOp() {
-
-//}
-
-//func (pm *PrvMsg) cmdAddAdmin() {
-
-//}
-
-//func (pm *PrvMsg) cmdAddAdmin() {
-
-//}
