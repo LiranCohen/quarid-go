@@ -18,6 +18,31 @@ type Service interface {
 	Commands() []Command
 }
 
+type Command struct {
+	Name        string
+	Description string
+	Restricted  bool
+	Channel     bool
+	Parameters  map[int]CmdParam //int = order starting at 0
+	Handler     MsgHandler
+}
+
+func NewCommand(name, description string) *Command {
+	c := Command{
+		Name:        name,
+		Description: description,
+		Restricted:  false,
+		Channel:     true,
+	}
+	return &c
+}
+
+type CmdParam struct {
+	Name        string
+	Description []string
+	Required    bool
+}
+
 type PrvMsg struct {
 	Prefix  string
 	Source  string
@@ -27,24 +52,7 @@ type PrvMsg struct {
 type MsgHandler func(*Cmd, adapter.Responder)
 
 func (ms *MsgService) initialize(services ...Service) adapter.HandlerFunc {
-	ms.Services = make(map[string]MsgHandler)
-	for _, service := range services {
-		ms.Services[service.Name()] = service.Handler()
-		logger.Log.Info(ms.Services)
-	}
 	return func(ev *adapter.Event, c adapter.Responder) {}
-}
-
-type Command struct {
-	Name        string
-	Description string
-	Parameters  []map[string][]string
-	Handler     MsgHandler
-}
-
-type Cmd struct {
-	Name       string
-	Parameters []string
 }
 
 type ChanBot struct {
