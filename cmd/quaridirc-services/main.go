@@ -6,16 +6,26 @@ import (
 	"github.com/enmand/quarid-go/pkg/adapter"
 	"github.com/enmand/quarid-go/pkg/bot"
 	"github.com/enmand/quarid-go/pkg/config"
+	"github.com/enmand/quarid-go/pkg/database"
 	"github.com/enmand/quarid-go/pkg/logger"
+
+	"github.com/boltdb/bolt"
 )
+
+var DB bolt.DB
 
 func main() {
 	c := config.Get()
 
+	logger.Log.Info("Loading DB...")
+	var err error
+	DB, err = bolt.NewBolt("services")
+	if err != nil {
+		logger.Log.Panic(err)
+	}
+
 	logger.Log.Info("Loading IRC bot...")
-
 	q := bot.New(&c)
-
 	q.LoadServices(MakeNickBot(), MakeChanBot())
 
 	if err := q.Connect(); err != nil {
@@ -97,6 +107,18 @@ func MakeNickBot() bot.GenServ {
 		"REGISTER",
 		"Register a new nick",
 	)
+	cmdRegNick.Parameters[0] = bot.CmdParam{
+		Name:        "Nick",
+		Description: []string{"Nick you would like to register"},
+		Required:    true,
+	}
+
+	cmdRegNick.Parameters[1] = bot.CmdParam{
+		Name:        "Password",
+		Description: []string{"Password you would like to use"},
+		Required:    true,
+	}
+
 	nickBot.AddCommands(cmdRegNick)
 
 	return nickBot
