@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/enmand/quarid-go/pkg/adapter"
+	"github.com/enmand/quarid-go/pkg/irc"
 	"github.com/enmand/quarid-go/pkg/logger"
 	//"github.com/enmand/quarid-go/pkg/config"
 )
@@ -69,6 +70,65 @@ type cmdOut struct {
 	UserMask string
 }
 
+func (c cmdOut) Respond(text string, r adapter.Responder) {
+	response := adapter.Event{
+		Command: irc.IRC_PRIVMSG,
+	}
+
+	nick := c.GetNick()
+
+	if len(c.Channel) > 0 {
+		response.Parameters = append(response.Parameters, c.Channel)
+		text = nick + ": " + text
+	} else {
+		response.Parameters = append(response.Parameters, nick)
+	}
+	response.Parameters = append(response.Parameters, text)
+	r.Write(&response)
+}
+func (c cmdOut) ActionTo(text string, target string, r adapter.Responder) {
+	response := adapter.Event{
+		Command: irc.IRC_PRIVMSG,
+	}
+
+	if len(c.Channel) > 0 {
+		response.Parameters = append(response.Parameters, c.Channel)
+		text = "\x01ACTION " + text + " " + target + "\x01"
+	} else {
+		return
+	}
+	response.Parameters = append(response.Parameters, text)
+	r.Write(&response)
+}
+
+func (c cmdOut) Action(text string, r adapter.Responder) {
+	response := adapter.Event{
+		Command: irc.IRC_PRIVMSG,
+	}
+
+	nick := c.GetNick()
+
+	if len(c.Channel) > 0 {
+		response.Parameters = append(response.Parameters, c.Channel)
+		text = "\x01ACTION " + text + " " + nick + "\x01"
+	} else {
+		return
+	}
+	response.Parameters = append(response.Parameters, text)
+	r.Write(&response)
+}
+
+func (c cmdOut) GetNick() string {
+	split := strings.Split(c.UserMask, "@")
+	if len(split) > 0 {
+		ident := strings.Split(split[0], "!")
+		if len(ident) > 0 {
+			return ident[0]
+		}
+	}
+	return ""
+}
+
 func checkChannel(s string) bool {
 	if len(s) > 0 && s[0:1] == "#" {
 		return true
@@ -77,6 +137,9 @@ func checkChannel(s string) bool {
 }
 
 func runCommand(cmd cmdOut, c Command, r adapter.Responder) {
+	if !c.Channel && len(cmd.Channel) > 0 {
+		return
+	}
 	if c.Handler != nil {
 		c.Handler(cmd, r)
 	}
@@ -136,6 +199,14 @@ func MakeChanBot() GenServ {
 		"!",
 	)
 
+	cmdCheese := NewCommand(
+		"CHEESE",
+		"To cheese someone",
+	)
+	cmdCheese.Handler = func(cmd cmdOut, c adapter.Responder) {
+		cmd.ActionTo("Marries", "DrCheese", c)
+	}
+
 	cmdOp := NewCommand(
 		"OP",
 		"OP a user or yourself within a channel",
@@ -152,6 +223,8 @@ func MakeChanBot() GenServ {
 	}
 	cmdOp.Handler = func(cmd cmdOut, c adapter.Responder) {
 		logger.Log.Warnf("Cmd: %#v\n", cmd)
+		cmd.Respond("Response", c)
+		cmd.Action("Killed", c)
 	}
 
 	cmdAddOp := NewCommand(
@@ -168,6 +241,7 @@ func MakeChanBot() GenServ {
 		cmdOp,
 		cmdAddOp,
 		cmdDropOp,
+		cmdCheese,
 	}
 
 	return chanBot
