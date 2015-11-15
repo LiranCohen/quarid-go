@@ -64,15 +64,6 @@ func MakeChanBot() bot.GenServ {
 		"!",
 	)
 
-	cmdCheese := bot.NewCommand(
-		"CHEESE",
-		"To cheese someone",
-	)
-
-	cmdCheese.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
-		cmd.Action(c, "Marries DrCheese")
-	}
-
 	cmdOp := bot.NewCommand(
 		"OP",
 		"OP a user or yourself within a channel",
@@ -91,11 +82,27 @@ func MakeChanBot() bot.GenServ {
 	}
 
 	cmdOp.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
-		nick := cmd.GetNick()
-		if CheckSession(nick, cmd.UserMask) && ChanPermission(nick, cmd.Channel) {
-			cmd.ChanMode(c, "+o", nick)
+		reqParams := 0
+		for _, param := range cmdOp.Parameters {
+			if param.Required {
+				reqParams++
+			}
+		}
+		if len(cmd.Params) < reqParams {
+			//Display Usage message
+			cmd.Respond(c, "Not enough params")
+			return
 		} else {
-			cmd.Respond(c, "Must login")
+			nick := cmd.GetNick()
+			if CheckSession(nick, cmd.UserMask) {
+				if err := ChanPermission(nick, cmd.Channel); err == nil {
+					cmd.ChanMode(c, "+o", nick)
+				} else {
+					cmd.Respond(c, "No Permissions")
+				}
+			} else {
+				cmd.Respond(c, "Must login")
+			}
 		}
 	}
 
@@ -109,11 +116,58 @@ func MakeChanBot() bot.GenServ {
 		"Drop a user from a channel's OP list",
 	)
 
+	cmdRegChan := bot.NewCommand(
+		"REGCHAN",
+		"Register a channel",
+	)
+
+	cmdRegChan.Channel = false
+
+	cmdRegChan.Parameters[0] = bot.CmdParam{
+		Name:        "Channel",
+		Description: []string{"Channel you would like registered"},
+		Required:    true,
+	}
+	cmdRegChan.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
+		reqParams := 0
+		for _, param := range cmdRegChan.Parameters {
+			if param.Required {
+				reqParams++
+			}
+		}
+		if len(cmd.Params) < reqParams {
+			//Display Usage message
+			cmd.Respond(c, "Not enough params")
+			return
+		} else {
+
+			nick := cmd.GetNick()
+			if CheckSession(nick, cmd.UserMask) {
+				if err := ChanPermission(nick, cmd.Params[0]); err != nil {
+					if err.Error() == "no permission" {
+						cmd.Respond(c, "Channel already registered")
+						return
+					} else if err.Error() == "no chan" {
+						//Register Channel
+						RegisterChannel(nick, cmd.Params[0])
+						cmd.Respond(c, "You are now the owner of "+cmd.Params[0])
+						return
+					}
+				} else {
+					cmd.Respond(c, "You alrady have permissions")
+					return
+				}
+			} else {
+				cmd.Respond(c, "Must login")
+			}
+		}
+	}
+
 	chanBot.AddCommands(
 		cmdOp,
 		cmdAddOp,
 		cmdDropOp,
-		cmdCheese,
+		cmdRegChan,
 	)
 
 	return chanBot
@@ -176,6 +230,8 @@ func MakeNickBot() bot.GenServ {
 				} else {
 					cmd.Respond(c, "Unknown Login Error")
 				}
+				return
+			} else if passErr.Error() == "doesn't exist" {
 				return
 			}
 		}
@@ -305,6 +361,42 @@ func CheckSession(nick, hostmask string) bool {
 
 }
 
-func ChanPermission(nick, channel string) bool {
+func ChanPermission(nick, channel string) error {
+	err := DB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("chans"))
+		v := b.Get([]byte(channel))
+		if v != nil {
+			cb := tx.Bucket([]byte(v))
+			cv := cb.Get([]byte(nick))
+			if cv != nil {
+				return nil
+			} else {
+				return errors.New("no permission")
+			}
+		}
+		return errors.New("no chan")
+	})
+	return err
+}
 
+func RegisterChannel(nick, channel string) error {
+	err := DB.Batch(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("chans"))
+		chanHash, err := bcrypt.GenerateFromPassword([]byte(channel), 1)
+		if err != nil {
+			return err
+		}
+		if err := b.Put([]byte(channel), chanHash); err != nil {
+			return err
+		}
+		cb, err := tx.CreateBucket(chanHash)
+		if err != nil {
+			return err
+		}
+		if err := cb.Put([]byte(nick), []byte("owner")); err != nil {
+			return err
+		}
+		return nil
+	})
+	return err
 }
