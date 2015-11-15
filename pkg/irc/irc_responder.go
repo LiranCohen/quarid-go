@@ -8,6 +8,7 @@ package irc
 import (
 	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/enmand/quarid-go/pkg/adapter"
 	"github.com/enmand/quarid-go/pkg/logger"
@@ -20,8 +21,11 @@ func (i *Client) Write(ev *adapter.Event) error {
 
 	payload = append(payload, []byte(ev.Command))
 	for i, p := range ev.Parameters {
-		if i == len(ev.Parameters)-1 && len(ev.Parameters) > 1 {
-			p = fmt.Sprintf(":%s", p)
+		if i == len(ev.Parameters)-1 {
+			multi := strings.Split(p, " ")
+			if len(multi) > 0 {
+				p = fmt.Sprintf(":%s", p)
+			}
 		}
 		payload = append(payload, []byte(p))
 	}
