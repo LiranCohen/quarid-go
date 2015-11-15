@@ -23,6 +23,12 @@
 			"verify": false,
 			"enable": false
 		},
+
+        "operator": {
+            "user": "",
+            "pass": ""
+        },
+
 		"channels": ["#offtopic"],
 		"admins": ["enmand", "orcam"]
 	}
