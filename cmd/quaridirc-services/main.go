@@ -28,6 +28,7 @@ func main() {
 }
 
 func MakeChanBot() bot.GenServ {
+
 	chanBot := bot.NewService(
 		"ChanBot",
 		"Manage Channels for registered users",
@@ -38,28 +39,32 @@ func MakeChanBot() bot.GenServ {
 		"CHEESE",
 		"To cheese someone",
 	)
+
 	cmdCheese.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
-		cmd.ActionTo("Marries", "DrCheese", c)
+		cmd.Action(c, "Marries DrCheese")
 	}
 
 	cmdOp := bot.NewCommand(
 		"OP",
 		"OP a user or yourself within a channel",
 	)
+
 	cmdOp.Parameters[0] = bot.CmdParam{
 		Name:        "Nick",
 		Description: []string{"Nick you would like to OP"},
 		Required:    false,
 	}
+
 	cmdOp.Parameters[1] = bot.CmdParam{
 		Name:        "Channel",
 		Description: []string{"Channel to OP in"},
 		Required:    false,
 	}
+
 	cmdOp.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
 		logger.Log.Warnf("Cmd: %#v\n", cmd)
-		cmd.Respond("Response", c)
-		cmd.Action("Killed", c)
+		cmd.Respond(c, "Response")
+		cmd.Action(c, "Killed")
 	}
 
 	cmdAddOp := bot.NewCommand(
@@ -71,6 +76,7 @@ func MakeChanBot() bot.GenServ {
 		"DROPOP",
 		"Drop a user from a channel's OP list",
 	)
+
 	chanBot.AddCommands(
 		cmdOp,
 		cmdAddOp,

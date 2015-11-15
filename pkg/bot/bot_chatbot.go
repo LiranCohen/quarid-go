@@ -6,7 +6,7 @@ import (
 
 	"github.com/enmand/quarid-go/pkg/adapter"
 	"github.com/enmand/quarid-go/pkg/irc"
-	"github.com/enmand/quarid-go/pkg/logger"
+	//"github.com/enmand/quarid-go/pkg/logger"
 	//"github.com/enmand/quarid-go/pkg/config"
 )
 
@@ -52,7 +52,10 @@ type CmdOut struct {
 	UserMask string
 }
 
-func (c CmdOut) Respond(text string, r adapter.Responder) {
+//Send response to user who issued the command
+//If user sent private message, response is in private message
+//If user sent a channel command, response is in the channel
+func (c CmdOut) Respond(r adapter.Responder, text string) {
 	response := adapter.Event{
 		Command: irc.IRC_PRIVMSG,
 	}
@@ -68,14 +71,17 @@ func (c CmdOut) Respond(text string, r adapter.Responder) {
 	response.Parameters = append(response.Parameters, text)
 	r.Write(&response)
 }
-func (c CmdOut) ActionTo(text string, target string, r adapter.Responder) {
+
+//Send an action to the channel which the command was issued
+//No action is sent if command was not issued from a channel
+func (c CmdOut) Action(r adapter.Responder, text string) {
 	response := adapter.Event{
 		Command: irc.IRC_PRIVMSG,
 	}
 
 	if len(c.Channel) > 0 {
 		response.Parameters = append(response.Parameters, c.Channel)
-		text = "\x01ACTION " + text + " " + target + "\x01"
+		text = "\x01ACTION " + text + "\x01"
 	} else {
 		return
 	}
@@ -83,23 +89,42 @@ func (c CmdOut) ActionTo(text string, target string, r adapter.Responder) {
 	r.Write(&response)
 }
 
-func (c CmdOut) Action(text string, r adapter.Responder) {
+//Send a general message into the channel which the command was issued
+//No message is sent if command was not issued from a channel
+func (c CmdOut) Message(r adapter.Responder, text string) {
 	response := adapter.Event{
 		Command: irc.IRC_PRIVMSG,
 	}
 
-	nick := c.GetNick()
-
 	if len(c.Channel) > 0 {
 		response.Parameters = append(response.Parameters, c.Channel)
-		text = "\x01ACTION " + text + " " + nick + "\x01"
 	} else {
 		return
 	}
+
 	response.Parameters = append(response.Parameters, text)
 	r.Write(&response)
 }
 
+//Send a MODE command to the channel which the command was issued
+//No mode is sent if command was not issued from a channel
+func (c CmdOut) ChanMode(r adapter.Responder, params ...string) {
+	response := adapter.Event{
+		Command: irc.IRC_MODE,
+	}
+
+	if len(c.Channel) > 0 {
+		response.Parameters = append(response.Parameters, c.Channel)
+	} else {
+		return
+	}
+
+	response.Parameters = append(response.Parameters, params...)
+	r.Write(&response)
+}
+
+//Retrieve the Nick of the user who issued the command
+//Gets the nick from the user's hostmask
 func (c CmdOut) GetNick() string {
 	split := strings.Split(c.UserMask, "@")
 	if len(split) > 0 {
