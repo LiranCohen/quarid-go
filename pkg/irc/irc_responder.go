@@ -23,7 +23,7 @@ func (i *Client) Write(ev *adapter.Event) error {
 	for i, p := range ev.Parameters {
 		if i == len(ev.Parameters)-1 {
 			multi := strings.Split(p, " ")
-			if len(multi) > 0 {
+			if len(multi) > 1 {
 				p = fmt.Sprintf(":%s", p)
 			}
 		}
