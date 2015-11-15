@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 
 	"github.com/enmand/quarid-go/pkg/adapter"
@@ -10,20 +11,31 @@ import (
 	"github.com/enmand/quarid-go/pkg/logger"
 
 	"github.com/boltdb/bolt"
+	"golang.org/x/crypto/bcrypt"
 )
 
-var DB bolt.DB
+var DB *bolt.DB
 
 func main() {
 	c := config.Get()
 
 	logger.Log.Info("Loading DB...")
 	var err error
-	DB, err = bolt.NewBolt("services")
+	DB, err = database.NewBolt("services")
 	if err != nil {
 		logger.Log.Panic(err)
 	}
 
+	if err := DB.Batch(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte("nicks"))
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists([]byte("chans"))
+		return err
+	}); err != nil {
+		logger.Log.Panic(err)
+	}
 	logger.Log.Info("Loading IRC bot...")
 	q := bot.New(&c)
 	q.LoadServices(MakeNickBot(), MakeChanBot())
@@ -73,8 +85,8 @@ func MakeChanBot() bot.GenServ {
 
 	cmdOp.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
 		logger.Log.Warnf("Cmd: %#v\n", cmd)
-		cmd.Respond(c, "Response")
-		cmd.Action(c, "Killed")
+		nick := cmd.GetNick()
+		cmd.ChanMode(c, "+o", nick)
 	}
 
 	cmdAddOp := bot.NewCommand(
@@ -103,23 +115,123 @@ func MakeNickBot() bot.GenServ {
 		"Manage persistant user registration for the server",
 		"#",
 	)
-	cmdRegNick := bot.NewCommand(
-		"REGISTER",
-		"Register a new nick",
-	)
-	cmdRegNick.Parameters[0] = bot.CmdParam{
-		Name:        "Nick",
-		Description: []string{"Nick you would like to register"},
-		Required:    true,
-	}
 
-	cmdRegNick.Parameters[1] = bot.CmdParam{
+	cmdLogin := bot.NewCommand(
+		"IDENTIFY",
+		"Identify yourself",
+	)
+
+	cmdLogin.Parameters[0] = bot.CmdParam{
 		Name:        "Password",
 		Description: []string{"Password you would like to use"},
 		Required:    true,
 	}
 
-	nickBot.AddCommands(cmdRegNick)
+	cmdLogin.Channel = false
+
+	cmdLogin.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
+		reqParams := 0
+		for _, param := range cmdLogin.Parameters {
+			if param.Required {
+				reqParams++
+			}
+		}
+		if len(cmd.Params) < reqParams {
+			//Display Usage message
+			cmd.Respond(c, "Not enough params")
+			return
+		} else {
+			nick := cmd.GetNick()
+			//check if exsits
+			var passHash []byte
+			passErr := DB.View(func(tx *bolt.Tx) error {
+				b := tx.Bucket([]byte("nicks"))
+				v := b.Get([]byte(nick))
+				if v == nil {
+					cmd.Respond(c, "User doesn't exist")
+					return errors.New("doesn't exist")
+				}
+				passHash = v
+				return nil
+			})
+			if passErr == nil {
+				err := bcrypt.CompareHashAndPassword(passHash, []byte(cmd.Params[0]))
+				if err != nil {
+					cmd.Respond(c, "Incorrect password")
+					return
+				}
+				cmd.Respond(c, "Logged in")
+				return
+			}
+		}
+		cmd.Respond(c, "Unknown Error")
+		return
+	}
+
+	cmdReg := bot.NewCommand(
+		"REGISTER",
+		"Register a new nick",
+	)
+
+	cmdReg.Parameters[0] = bot.CmdParam{
+		Name:        "Password",
+		Description: []string{"Password you would like to use"},
+		Required:    true,
+	}
+
+	cmdReg.Channel = false
+
+	cmdReg.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
+		reqParams := 0
+		for _, param := range cmdReg.Parameters {
+			if param.Required {
+				reqParams++
+			}
+		}
+		if len(cmd.Params) < reqParams {
+			//Display Usage message
+			cmd.Respond(c, "Not enough params")
+			return
+		} else {
+			nick := cmd.GetNick()
+			//check if exsits
+			pass := DB.Batch(func(tx *bolt.Tx) error {
+				b := tx.Bucket([]byte("nicks"))
+				v := b.Get([]byte(nick))
+				if v == nil {
+					return nil
+				}
+				return errors.New("user exists")
+			})
+			if pass == nil {
+				reg := DB.Batch(func(tx *bolt.Tx) error {
+					b := tx.Bucket([]byte("nicks"))
+					if len(cmd.Params[0]) < 5 {
+						cmd.Respond(c, "Password must be at least 5 chars")
+						return errors.New("password lenght")
+					}
+					hash, err := bcrypt.GenerateFromPassword([]byte(cmd.Params[0]), 10)
+					if err != nil {
+						return err
+					}
+					err = b.Put([]byte(nick), hash)
+					return err
+				})
+				logger.Log.Printf("Reg: %#v\n", reg)
+				if reg == nil {
+					cmd.Respond(c, "Registered")
+					return
+				}
+			} else {
+				cmd.Respond(c, "User already exists")
+				return
+			}
+		}
+		cmd.Respond(c, "Unknown Error")
+		return
+	}
+
+	nickBot.AddCommands(cmdReg, cmdLogin)
 
 	return nickBot
 }

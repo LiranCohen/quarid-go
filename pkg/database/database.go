@@ -1,14 +1,14 @@
 package database
 
 import (
-	"fmt"
-	"strings"
+	//"fmt"
+	//"strings"
 
 	"github.com/boltdb/bolt"
 	"upper.io/db"
 
 	"github.com/enmand/quarid-go/pkg/config"
-	"github.com/enmand/quarid-go/pkg/crate"
+	//"github.com/enmand/quarid-go/pkg/crate"
 	"github.com/enmand/quarid-go/pkg/logger"
 )
 
@@ -49,19 +49,19 @@ func Get() Database {
 }
 
 // GetCrate returns a database for the given Crate
-func GetCrate(c *crate.Crate) VMDatabase {
-	cfg := config.Get()
-	dbConfig := cfg.GetString("vm.database")
+//func GetCrate(c *crate.Crate) VMDatabase {
+//cfg := config.Get()
+//dbConfig := cfg.GetString("vm.database")
 
-	uri := strings.Split(dbConfig, "://") // uri[0] is proto, uri[1] is uri
+//uri := strings.Split(dbConfig, "://") // uri[0] is proto, uri[1] is uri
 
-	uri[1] = fmt.Sprintf("%s/%s", uri, c.ID)
+//uri[1] = fmt.Sprintf("%s/%s", uri, c.ID)
 
-	d, err := openBolt(uri[0])
-	if err != nil {
-		l.Errorf("Cannot open VM database %s", uri)
-		return VMDatabase{nil}
-	}
+//d, err := openBolt(uri[0])
+//if err != nil {
+//l.Errorf("Cannot open VM database %s", uri)
+//return VMDatabase{nil}
+//}
 
-	return d
-}
+//return d
+//}
