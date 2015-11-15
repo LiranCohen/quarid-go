@@ -3,6 +3,9 @@ package main
 import (
 	"errors"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/enmand/quarid-go/pkg/adapter"
 	"github.com/enmand/quarid-go/pkg/bot"
@@ -28,6 +31,10 @@ func main() {
 
 	if err := DB.Batch(func(tx *bolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists([]byte("nicks"))
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists([]byte("hostmasks"))
 		if err != nil {
 			return err
 		}
@@ -84,9 +91,12 @@ func MakeChanBot() bot.GenServ {
 	}
 
 	cmdOp.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
-		logger.Log.Warnf("Cmd: %#v\n", cmd)
 		nick := cmd.GetNick()
-		cmd.ChanMode(c, "+o", nick)
+		if CheckSession(nick, cmd.UserMask) && ChanPermission(nick, cmd.Channel) {
+			cmd.ChanMode(c, "+o", nick)
+		} else {
+			cmd.Respond(c, "Must login")
+		}
 	}
 
 	cmdAddOp := bot.NewCommand(
@@ -160,7 +170,12 @@ func MakeNickBot() bot.GenServ {
 					cmd.Respond(c, "Incorrect password")
 					return
 				}
-				cmd.Respond(c, "Logged in")
+				if err := Login(nick, cmd.UserMask); err == nil {
+					cmd.Respond(c, "Logged In")
+					return
+				} else {
+					cmd.Respond(c, "Unknown Login Error")
+				}
 				return
 			}
 		}
@@ -217,9 +232,12 @@ func MakeNickBot() bot.GenServ {
 					err = b.Put([]byte(nick), hash)
 					return err
 				})
-				logger.Log.Printf("Reg: %#v\n", reg)
 				if reg == nil {
-					cmd.Respond(c, "Registered")
+					if err := Login(nick, cmd.UserMask); err == nil {
+						cmd.Respond(c, "Registered & LoggedIn")
+					} else {
+						cmd.Respond(c, "Registered, But error logging in.")
+					}
 					return
 				}
 			} else {
@@ -234,4 +252,59 @@ func MakeNickBot() bot.GenServ {
 	nickBot.AddCommands(cmdReg, cmdLogin)
 
 	return nickBot
+}
+
+func Login(nick, hostmask string) error {
+	masks := strings.Split(hostmask, "@")
+	var storeMask string
+	if len(masks) > 1 {
+		storeMask = nick + ":" + strings.Join(masks[1:], "@")
+	}
+	err := DB.Batch(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("hostmasks"))
+		timeNow := strconv.Itoa(int(time.Now().Unix()))
+		err := b.Put([]byte(storeMask), []byte(timeNow))
+		return err
+	})
+	return err
+}
+
+func CheckSession(nick, hostmask string) bool {
+	masks := strings.Split(hostmask, "@")
+	var storeMask string
+	if len(masks) > 1 {
+		storeMask = nick + ":" + strings.Join(masks[1:], "@")
+	}
+	err := DB.Batch(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("hostmasks"))
+		v := b.Get([]byte(storeMask))
+		if v == nil {
+			return errors.New("doesn't exist")
+		}
+		t, err := strconv.Atoi(string(v))
+		if err != nil {
+			return errors.New("bad conversion")
+		}
+		lastSess := time.Unix(int64(t), 0)
+		maxDur, err := time.ParseDuration("1h")
+		if err != nil {
+			return errors.New("session ended")
+		}
+		if lastSess.Add(maxDur).After(time.Now()) {
+			timeNow := strconv.Itoa(int(time.Now().Unix()))
+			err := b.Put([]byte(storeMask), []byte(timeNow))
+			return err
+		}
+		return errors.New("unknown error")
+	})
+	if err != nil {
+		return false
+	} else {
+		return true
+	}
+
+}
+
+func ChanPermission(nick, channel string) bool {
+
 }

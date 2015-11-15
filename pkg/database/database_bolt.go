@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
+	//"time"
 
 	//"github.com/enmand/quarid-go/pkg/logger"
 
@@ -24,7 +24,7 @@ func openBolt(constr string) (VMDatabase, error) {
 
 func NewBolt(name string) (*bolt.DB, error) {
 	name += ".db"
-	db, err := bolt.Open(name, 0600, &bolt.Options{Timeout: 2 * time.Second})
+	db, err := bolt.Open(name, 0600, nil)
 	if err != nil {
 		return nil, err
 	}
