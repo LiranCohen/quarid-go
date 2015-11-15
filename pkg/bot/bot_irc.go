@@ -53,22 +53,28 @@ func (q *quarid) initialize() error {
 		}
 	}
 
-	services := []string{
-		"chanServ",
-		"nivkServ",
-	}
+	return nil
+}
 
-	msgService := &MsgService{}
-	prvMsg := msgService.initialize(services)
+func (q *quarid) LoadServices(services ...Service) {
+	prvMsg := func(ev *adapter.Event, c adapter.Responder) {
+		for _, service := range services {
+			if cmd, ok := readCommand(ev, service); ok {
+				for _, command := range service.Commands() {
+					if command.Name == cmd.Name {
+						runCommand(cmd, command, c)
+					}
+				}
+			}
+		}
+	}
 
 	q.IRC.Handle(
 		[]adapter.Filter{irc.CommandFilter{Command: irc.IRC_PRIVMSG}},
 		prvMsg,
 	)
 
-	return nil
 }
-
 func (q *quarid) LoadPlugins(dirs []string) ([]plugin.Plugin, []error) {
 	var ps []plugin.Plugin
 	var errs []error

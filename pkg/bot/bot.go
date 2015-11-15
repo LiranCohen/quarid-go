@@ -13,6 +13,9 @@ type Bot interface {
 	// Load all of the plugins in each `dir`
 	LoadPlugins(dir []string) ([]plugin.Plugin, []error)
 
+	//Load Services
+	LoadServices(services []Service)
+
 	// Connect to the configured server
 	Connect() error
 

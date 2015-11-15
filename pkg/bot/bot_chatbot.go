@@ -10,10 +10,6 @@ import (
 	//"github.com/enmand/quarid-go/pkg/config"
 )
 
-type MsgService struct {
-	Services map[string]Service
-}
-
 type Service interface {
 	Name() string
 	Description() string
@@ -47,30 +43,16 @@ type CmdParam struct {
 	Required    bool
 }
 
-type MsgHandler func(cmdOut, adapter.Responder)
+type MsgHandler func(CmdOut, adapter.Responder)
 
-func (ms *MsgService) initialize(services ...Service) adapter.HandlerFunc {
-	return func(ev *adapter.Event, c adapter.Responder) {
-		for _, service := range services {
-			if cmd, ok := readCommand(ev, service); ok {
-				for _, command := range service.Commands() {
-					if command.Name == cmd.Name {
-						runCommand(cmd, command, c)
-					}
-				}
-			}
-		}
-	}
-}
-
-type cmdOut struct {
+type CmdOut struct {
 	Name     string
 	Params   []string
 	Channel  string
 	UserMask string
 }
 
-func (c cmdOut) Respond(text string, r adapter.Responder) {
+func (c CmdOut) Respond(text string, r adapter.Responder) {
 	response := adapter.Event{
 		Command: irc.IRC_PRIVMSG,
 	}
@@ -86,7 +68,7 @@ func (c cmdOut) Respond(text string, r adapter.Responder) {
 	response.Parameters = append(response.Parameters, text)
 	r.Write(&response)
 }
-func (c cmdOut) ActionTo(text string, target string, r adapter.Responder) {
+func (c CmdOut) ActionTo(text string, target string, r adapter.Responder) {
 	response := adapter.Event{
 		Command: irc.IRC_PRIVMSG,
 	}
@@ -101,7 +83,7 @@ func (c cmdOut) ActionTo(text string, target string, r adapter.Responder) {
 	r.Write(&response)
 }
 
-func (c cmdOut) Action(text string, r adapter.Responder) {
+func (c CmdOut) Action(text string, r adapter.Responder) {
 	response := adapter.Event{
 		Command: irc.IRC_PRIVMSG,
 	}
@@ -118,7 +100,7 @@ func (c cmdOut) Action(text string, r adapter.Responder) {
 	r.Write(&response)
 }
 
-func (c cmdOut) GetNick() string {
+func (c CmdOut) GetNick() string {
 	split := strings.Split(c.UserMask, "@")
 	if len(split) > 0 {
 		ident := strings.Split(split[0], "!")
@@ -136,7 +118,7 @@ func checkChannel(s string) bool {
 	return false
 }
 
-func runCommand(cmd cmdOut, c Command, r adapter.Responder) {
+func runCommand(cmd CmdOut, c Command, r adapter.Responder) {
 	if !c.Channel && len(cmd.Channel) > 0 {
 		return
 	}
@@ -145,8 +127,8 @@ func runCommand(cmd cmdOut, c Command, r adapter.Responder) {
 	}
 }
 
-func readCommand(ev *adapter.Event, se Service) (cmdOut, bool) {
-	cmd := cmdOut{}
+func readCommand(ev *adapter.Event, se Service) (CmdOut, bool) {
+	cmd := CmdOut{}
 	if len(ev.Parameters) > 1 {
 		params := strings.Split(ev.Parameters[1], " ")
 		for i, param := range params {
@@ -192,76 +174,6 @@ type GenServ struct {
 	prefix      string
 }
 
-func MakeChanBot() GenServ {
-	chanBot := NewService(
-		"ChanBot",
-		"Manage Channels for registered users",
-		"!",
-	)
-
-	cmdCheese := NewCommand(
-		"CHEESE",
-		"To cheese someone",
-	)
-	cmdCheese.Handler = func(cmd cmdOut, c adapter.Responder) {
-		cmd.ActionTo("Marries", "DrCheese", c)
-	}
-
-	cmdOp := NewCommand(
-		"OP",
-		"OP a user or yourself within a channel",
-	)
-	cmdOp.Parameters[0] = CmdParam{
-		Name:        "Nick",
-		Description: []string{"Nick you would like to OP"},
-		Required:    false,
-	}
-	cmdOp.Parameters[1] = CmdParam{
-		Name:        "Channel",
-		Description: []string{"Channel to OP in"},
-		Required:    false,
-	}
-	cmdOp.Handler = func(cmd cmdOut, c adapter.Responder) {
-		logger.Log.Warnf("Cmd: %#v\n", cmd)
-		cmd.Respond("Response", c)
-		cmd.Action("Killed", c)
-	}
-
-	cmdAddOp := NewCommand(
-		"ADDOP",
-		"Add a user to a channel's OP list",
-	)
-
-	cmdDropOp := NewCommand(
-		"DROPOP",
-		"Drop a user from a channel's OP list",
-	)
-
-	chanBot.commands = []Command{
-		cmdOp,
-		cmdAddOp,
-		cmdDropOp,
-		cmdCheese,
-	}
-
-	return chanBot
-}
-
-func MakeNickBot() GenServ {
-	nickBot := NewService(
-		"NickBot",
-		"Manage persistant user registration for the server",
-		"#",
-	)
-	cmdRegNick := NewCommand(
-		"REGISTER",
-		"Register a new nick",
-	)
-	nickBot.commands = []Command{cmdRegNick}
-
-	return nickBot
-}
-
 func NewService(name, description, prefix string) GenServ {
 	g := GenServ{
 		name:        name,
@@ -269,6 +181,12 @@ func NewService(name, description, prefix string) GenServ {
 		prefix:      prefix,
 	}
 	return g
+}
+
+func (gs *GenServ) AddCommands(commands ...Command) {
+	for _, command := range commands {
+		gs.commands = append(gs.commands, command)
+	}
 }
 
 func (gs GenServ) Name() string {
