@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -95,7 +96,7 @@ func MakeChanBot() bot.GenServ {
 		} else {
 			nick := cmd.GetNick()
 			if CheckSession(nick, cmd.UserMask) {
-				if err := ChanPermission(nick, cmd.Channel); err == nil {
+				if _, err := ChanPermission(nick, cmd.Channel); err == nil {
 					cmd.ChanMode(c, "+o", nick)
 				} else {
 					cmd.Respond(c, "No Permissions")
@@ -110,6 +111,94 @@ func MakeChanBot() bot.GenServ {
 		"ADDOP",
 		"Add a user to a channel's OP list",
 	)
+	cmdAddOp.Parameters[0] = bot.CmdParam{
+		Name:        "Nick",
+		Description: []string{"Nick you would like to OP"},
+		Required:    true,
+	}
+
+	cmdAddOp.Parameters[1] = bot.CmdParam{
+		Name:        "Channel",
+		Description: []string{"Channel to OP in"},
+		Required:    false,
+	}
+
+	cmdAddOp.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
+		reqParams := 0
+		for _, param := range cmdAddOp.Parameters {
+			if param.Required {
+				reqParams++
+			}
+		}
+		if len(cmd.Params) < reqParams {
+			//Display Usage message
+			cmd.Respond(c, "Not enough params")
+			return
+		} else {
+			nick := cmd.GetNick()
+			if len(cmd.Channel) > 0 {
+				if CheckSession(nick, cmd.UserMask) {
+					if perm, err := ChanPermission(nick, cmd.Channel); err == nil {
+						if perm == "owner" {
+							if err := AddChanOp(
+								cmd.Params[0],
+								cmd.Channel,
+							); err != nil {
+								cmd.Respond(c, err.Error())
+								return
+							} else {
+								cmd.Respond(
+									c,
+									fmt.Sprintf(
+										"%v is now an OP in %v",
+										cmd.Params[0],
+										cmd.Channel,
+									),
+								)
+								return
+							}
+						}
+					} else {
+						cmd.Respond(c, "No Permissions")
+					}
+				} else {
+					cmd.Respond(c, "Must login")
+				}
+			} else {
+				if len(cmd.Params) != len(cmdAddOp.Parameters) {
+					cmd.Respond(c, "Not enough params")
+					return
+				}
+				if CheckSession(nick, cmd.UserMask) {
+					if perm, err := ChanPermission(nick, cmd.Params[1]); err == nil {
+						if perm == "owner" {
+							if err := AddChanOp(
+								cmd.Params[0],
+								cmd.Params[1],
+							); err != nil {
+								cmd.Respond(c, err.Error())
+							} else {
+								cmd.Respond(
+									c,
+									fmt.Sprintf(
+										"%v is now an OP in %v",
+										cmd.Params[0],
+										cmd.Params[1],
+									),
+								)
+								return
+							}
+						}
+					} else {
+						cmd.Respond(c, "No Permissions")
+					}
+				} else {
+					cmd.Respond(c, "Must login")
+				}
+
+			}
+		}
+	}
 
 	cmdDropOp := bot.NewCommand(
 		"DROPOP",
@@ -143,7 +232,7 @@ func MakeChanBot() bot.GenServ {
 
 			nick := cmd.GetNick()
 			if CheckSession(nick, cmd.UserMask) {
-				if err := ChanPermission(nick, cmd.Params[0]); err != nil {
+				if _, err := ChanPermission(nick, cmd.Params[0]); err != nil {
 					if err.Error() == "no permission" {
 						cmd.Respond(c, "Channel already registered")
 						return
@@ -266,7 +355,7 @@ func MakeNickBot() bot.GenServ {
 		} else {
 			nick := cmd.GetNick()
 			//check if exsits
-			pass := DB.Batch(func(tx *bolt.Tx) error {
+			pass := DB.View(func(tx *bolt.Tx) error {
 				b := tx.Bucket([]byte("nicks"))
 				v := b.Get([]byte(nick))
 				if v == nil {
@@ -361,14 +450,16 @@ func CheckSession(nick, hostmask string) bool {
 
 }
 
-func ChanPermission(nick, channel string) error {
+func ChanPermission(nick, channel string) (string, error) {
+	var perm string
 	err := DB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("chans"))
 		v := b.Get([]byte(channel))
 		if v != nil {
-			cb := tx.Bucket([]byte(v))
+			cb := tx.Bucket(v)
 			cv := cb.Get([]byte(nick))
 			if cv != nil {
+				perm = string(cv)
 				return nil
 			} else {
 				return errors.New("no permission")
@@ -376,7 +467,7 @@ func ChanPermission(nick, channel string) error {
 		}
 		return errors.New("no chan")
 	})
-	return err
+	return perm, err
 }
 
 func RegisterChannel(nick, channel string) error {
@@ -399,4 +490,32 @@ func RegisterChannel(nick, channel string) error {
 		return nil
 	})
 	return err
+}
+
+func AddChanOp(nick, channel string) error {
+	pass := DB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("nicks"))
+		v := b.Get([]byte(nick))
+		if v == nil {
+			return errors.New("user doesn't exist")
+		}
+		return nil
+	})
+	if pass == nil {
+		err := DB.Batch(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte("chans"))
+			chanHash := b.Get([]byte(channel))
+			if chanHash != nil {
+				cb := tx.Bucket(chanHash)
+				if err := cb.Put([]byte(nick), []byte("op")); err != nil {
+					return err
+				}
+				return nil
+			}
+			return errors.New("chan error")
+		})
+		return err
+	} else {
+		return pass
+	}
 }
