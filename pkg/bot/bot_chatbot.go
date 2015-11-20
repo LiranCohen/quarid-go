@@ -126,9 +126,9 @@ func (c CmdOut) ChanMode(r adapter.Responder, params ...string) {
 //Retrieve the Nick of the user who issued the command
 //Gets the nick from the user's hostmask
 func (c CmdOut) GetNick() string {
-	split := strings.Split(c.UserMask, "@")
+	split := strings.SplitN(c.UserMask, "@", 2)
 	if len(split) > 0 {
-		ident := strings.Split(split[0], "!")
+		ident := strings.SplitN(split[0], "!", 2)
 		if len(ident) > 0 {
 			return ident[0]
 		}
@@ -155,10 +155,11 @@ func runCommand(cmd CmdOut, c Command, r adapter.Responder) {
 func readCommand(ev *adapter.Event, se Service) (CmdOut, bool) {
 	cmd := CmdOut{}
 	if len(ev.Parameters) > 1 {
-		params := strings.Split(ev.Parameters[1], " ")
-		for i, param := range params {
-			if param == "" {
-				params = append(params[:i], params[i+1:]...)
+		allparams := strings.Split(ev.Parameters[1], " ")
+		params := []string{}
+		for _, param := range allparams {
+			if param != "" {
+				params = append(params, param)
 			}
 		}
 		if checkChannel(ev.Parameters[0]) {

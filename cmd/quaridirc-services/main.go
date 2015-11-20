@@ -29,7 +29,6 @@ func main() {
 	if err != nil {
 		logger.Log.Panic(err)
 	}
-
 	if err := DB.Batch(func(tx *bolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists([]byte("nicks"))
 		if err != nil {
@@ -41,11 +40,17 @@ func main() {
 		}
 		_, err = tx.CreateBucketIfNotExists([]byte("chans"))
 		return err
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists([]byte("seen"))
+		return err
 	}); err != nil {
 		logger.Log.Panic(err)
 	}
 	logger.Log.Info("Loading IRC bot...")
 	q := bot.New(&c)
+	//q.EnableSeen(DB)
 	q.LoadServices(MakeNickBot(), MakeChanBot())
 
 	if err := q.Connect(); err != nil {
@@ -205,6 +210,97 @@ func MakeChanBot() bot.GenServ {
 		"Drop a user from a channel's OP list",
 	)
 
+	cmdDropOp.Channel = true
+
+	cmdDropOp.Parameters[0] = bot.CmdParam{
+		Name:        "Nick",
+		Description: []string{"Nick you would like to de-OP"},
+		Required:    true,
+	}
+
+	cmdDropOp.Parameters[1] = bot.CmdParam{
+		Name:        "Channel",
+		Description: []string{"Channel to de-OP in"},
+		Required:    false,
+	}
+
+	cmdDropOp.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
+		reqParams := 0
+		for _, param := range cmdDropOp.Parameters {
+			if param.Required {
+				reqParams++
+			}
+		}
+		if len(cmd.Params) < reqParams {
+			//Display Usage message
+			cmd.Respond(c, "Not enough params")
+			return
+		} else {
+			nick := cmd.GetNick()
+			if len(cmd.Channel) > 0 {
+				if CheckSession(nick, cmd.UserMask) {
+					if perm, err := ChanPermission(nick, cmd.Channel); err == nil {
+						if perm == "owner" {
+							if err := RemChanOp(
+								cmd.Params[0],
+								cmd.Channel,
+							); err != nil {
+								cmd.Respond(c, err.Error())
+								return
+							} else {
+								cmd.Respond(
+									c,
+									fmt.Sprintf(
+										"%v is no longer an OP in %v",
+										cmd.Params[0],
+										cmd.Channel,
+									),
+								)
+								return
+							}
+						}
+					} else {
+						cmd.Respond(c, "No Permissions")
+					}
+				} else {
+					cmd.Respond(c, "Must login")
+				}
+			} else {
+				if len(cmd.Params) != len(cmdAddOp.Parameters) {
+					cmd.Respond(c, "Not enough params")
+					return
+				}
+				if CheckSession(nick, cmd.UserMask) {
+					if perm, err := ChanPermission(nick, cmd.Params[1]); err == nil {
+						if perm == "owner" {
+							if err := RemChanOp(
+								cmd.Params[0],
+								cmd.Params[1],
+							); err != nil {
+								cmd.Respond(c, err.Error())
+							} else {
+								cmd.Respond(
+									c,
+									fmt.Sprintf(
+										"%v is no longer an OP in %v",
+										cmd.Params[0],
+										cmd.Params[1],
+									),
+								)
+								return
+							}
+						}
+					} else {
+						cmd.Respond(c, "No Permissions")
+					}
+				} else {
+					cmd.Respond(c, "Must login")
+				}
+
+			}
+		}
+	}
+
 	cmdRegChan := bot.NewCommand(
 		"REGCHAN",
 		"Register a channel",
@@ -268,6 +364,54 @@ func MakeNickBot() bot.GenServ {
 		"Manage persistant user registration for the server",
 		"#",
 	)
+
+	cmdSeen := bot.NewCommand(
+		"SEEN",
+		"Identify yourself",
+	)
+
+	cmdSeen.Parameters[0] = bot.CmdParam{
+		Name:        "Nick",
+		Description: []string{"Nick seen"},
+		Required:    true,
+	}
+
+	cmdSeen.Channel = true
+	cmdSeen.Handler = func(cmd bot.CmdOut, c adapter.Responder) {
+		reqParams := 0
+		for _, param := range cmdSeen.Parameters {
+			if param.Required {
+				reqParams++
+			}
+		}
+		if len(cmd.Params) < reqParams {
+			cmd.Respond(c, "Who?")
+			return
+		} else {
+			DB.Batch(func(tx *bolt.Tx) error {
+				b := tx.Bucket([]byte("seen"))
+				nick := strings.ToLower(cmd.Params[0])
+				v := b.Get([]byte(nick))
+				if v != nil {
+					seenVals := strings.SplitN(string(v), ":", 2)
+					sChan := seenVals[0]
+					uTime, err := strconv.Atoi(seenVals[1])
+					if err != nil {
+						return errors.New("cannot convert")
+					}
+					sTime := time.Unix(int64(uTime), 0)
+					responseText := fmt.Sprintf(
+						"%v was last seen in %v on %v",
+						cmd.Params[0],
+						sChan,
+						sTime,
+					)
+					cmd.Respond(c, responseText)
+				}
+				return nil
+			})
+		}
+	}
 
 	cmdLogin := bot.NewCommand(
 		"IDENTIFY",
@@ -374,7 +518,7 @@ func MakeNickBot() bot.GenServ {
 					if err != nil {
 						return err
 					}
-					err = b.Put([]byte(nick), hash)
+					err = b.Put([]byte(strings.ToLower(nick)), hash)
 					return err
 				})
 				if reg == nil {
@@ -400,6 +544,7 @@ func MakeNickBot() bot.GenServ {
 }
 
 func Login(nick, hostmask string) error {
+	nick = strings.ToLower(nick)
 	masks := strings.Split(hostmask, "@")
 	var storeMask string
 	if len(masks) > 1 {
@@ -415,6 +560,7 @@ func Login(nick, hostmask string) error {
 }
 
 func CheckSession(nick, hostmask string) bool {
+	nick = strings.ToLower(nick)
 	masks := strings.Split(hostmask, "@")
 	var storeMask string
 	if len(masks) > 1 {
@@ -451,6 +597,8 @@ func CheckSession(nick, hostmask string) bool {
 }
 
 func ChanPermission(nick, channel string) (string, error) {
+	nick = strings.ToLower(nick)
+	channel = strings.ToLower(channel)
 	var perm string
 	err := DB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("chans"))
@@ -471,6 +619,7 @@ func ChanPermission(nick, channel string) (string, error) {
 }
 
 func RegisterChannel(nick, channel string) error {
+	nick = strings.ToLower(nick)
 	err := DB.Batch(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("chans"))
 		chanHash, err := bcrypt.GenerateFromPassword([]byte(channel), 1)
@@ -493,6 +642,8 @@ func RegisterChannel(nick, channel string) error {
 }
 
 func AddChanOp(nick, channel string) error {
+	nick = strings.ToLower(nick)
+	channel = strings.ToLower(nick)
 	pass := DB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("nicks"))
 		v := b.Get([]byte(nick))
@@ -508,6 +659,36 @@ func AddChanOp(nick, channel string) error {
 			if chanHash != nil {
 				cb := tx.Bucket(chanHash)
 				if err := cb.Put([]byte(nick), []byte("op")); err != nil {
+					return err
+				}
+				return nil
+			}
+			return errors.New("chan error")
+		})
+		return err
+	} else {
+		return pass
+	}
+}
+
+func RemChanOp(nick, channel string) error {
+	nick = strings.ToLower(nick)
+	channel = strings.ToLower(nick)
+	pass := DB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("nicks"))
+		v := b.Get([]byte(nick))
+		if v == nil {
+			return errors.New("user doesn't exist")
+		}
+		return nil
+	})
+	if pass == nil {
+		err := DB.Batch(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte("chans"))
+			chanHash := b.Get([]byte(channel))
+			if chanHash != nil {
+				cb := tx.Bucket(chanHash)
+				if err := cb.Delete([]byte(nick)); err != nil {
 					return err
 				}
 				return nil
